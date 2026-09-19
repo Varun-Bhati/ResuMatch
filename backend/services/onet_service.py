@@ -11,7 +11,9 @@ ONET_FILE = os.path.join(
 
 
 def load_onet_software():
+
     if not os.path.exists(ONET_FILE):
+
         raise FileNotFoundError(
             f"O*NET software skills file not found: {ONET_FILE}"
         )
@@ -31,6 +33,7 @@ def load_onet_software():
     missing_columns = required_columns - set(df.columns)
 
     if missing_columns:
+
         raise ValueError(
             f"Missing O*NET columns: {missing_columns}"
         )
@@ -39,7 +42,9 @@ def load_onet_software():
 
 
 def normalize_onet_text(text):
+
     if not isinstance(text, str):
+
         return ""
 
     text = text.lower()
@@ -60,7 +65,9 @@ def normalize_onet_text(text):
 
 
 def label_in_text(label, normalized_text):
+
     if not label:
+
         return False
 
     pattern = (
@@ -79,30 +86,40 @@ def short_label_in_original_text(
     label,
     original_text
 ):
+
     if not label or not original_text:
+
         return False
 
-    pattern = (
-        r"(?<![\w.])"
-        + re.escape(label)
-        + r"(?!\w)"
+    normalized_label = normalize_onet_text(
+        label
     )
 
-    return re.search(
-        pattern,
+    normalized_text = normalize_onet_text(
         original_text
-    ) is not None
+    )
+
+    if not normalized_label or not normalized_text:
+
+        return False
+
+    padded_label = " " + normalized_label + " "
+    padded_text = " " + normalized_text + " "
+
+    return padded_label in padded_text
 
 
 def extract_acronyms_from_workplace_example(
     workplace_example
 ):
+
     """
     Extract uppercase acronym-like tokens directly
     from the O*NET Workplace Example.
     """
 
     if not isinstance(workplace_example, str):
+
         return []
 
     acronym_pattern = r"\b[A-Z][A-Z0-9+#.]{1,9}\b"
@@ -117,24 +134,24 @@ def is_primary_acronym_entry(
     workplace_example,
     acronym
 ):
+
     """
     Determine whether an acronym is being used as
     the primary technology identity.
 
     Examples accepted:
-
         Structured query language SQL
         Structure query language SQL
         Amazon Web Services AWS software
 
     Examples rejected:
-
         Oracle PL/SQL
         SAP Sybase SQL Anywhere
         Data Recovery Software SQL Server Data Recovery
     """
 
     if not workplace_example or not acronym:
+
         return False
 
     words = workplace_example.split()
@@ -150,11 +167,13 @@ def is_primary_acronym_entry(
         )
 
         if cleaned_word:
+
             cleaned_words.append(
                 cleaned_word
             )
 
     if acronym not in cleaned_words:
+
         return False
 
     acronym_index = cleaned_words.index(
@@ -162,6 +181,7 @@ def is_primary_acronym_entry(
     )
 
     if acronym_index < 2:
+
         return False
 
     words_before = cleaned_words[
@@ -171,9 +191,11 @@ def is_primary_acronym_entry(
     for word in words_before:
 
         if len(word) <= 2:
+
             return False
 
         if word.isupper():
+
             return False
 
     return True
@@ -183,6 +205,7 @@ def get_canonical_technology(
     workplace_example,
     matched_term
 ):
+
     """
     Convert duplicate O*NET technology descriptions
     into one canonical technology label.
@@ -206,24 +229,31 @@ def get_canonical_technology(
 
     # O*NET contains two nearly identical descriptions
     # for the SQL programming language.
+
     if normalized_example in {
         "structured query language sql",
         "structure query language sql"
     }:
+
         return "SQL"
 
     # For all other technologies, keep the original
     # O*NET Workplace Example.
+
     return workplace_example
 
 
 def extract_onet_software(text):
+
     if not text or not text.strip():
+
         return []
 
     df = load_onet_software()
 
-    normalized_text = normalize_onet_text(text)
+    normalized_text = normalize_onet_text(
+        text
+    )
 
     matches = {}
 
@@ -244,12 +274,20 @@ def extract_onet_software(text):
 
     for _, row in df.iterrows():
 
-        workplace_example = row["Workplace Example"]
+        workplace_example = row[
+            "Workplace Example"
+        ]
 
-        if not isinstance(workplace_example, str):
+        if not isinstance(
+            workplace_example,
+            str
+        ):
+
             continue
 
-        workplace_example = workplace_example.strip()
+        workplace_example = (
+            workplace_example.strip()
+        )
 
         normalized_workplace_example = (
             normalize_onet_text(
@@ -258,12 +296,15 @@ def extract_onet_software(text):
         )
 
         if not normalized_workplace_example:
+
             continue
 
         if normalized_workplace_example in ignored_terms:
+
             continue
 
         if len(normalized_workplace_example) < 3:
+
             continue
 
         matched_term = None
@@ -279,6 +320,7 @@ def extract_onet_software(text):
                 workplace_example,
                 text
             ):
+
                 matched_term = workplace_example
                 match_source = "workplace_example"
 
@@ -288,6 +330,7 @@ def extract_onet_software(text):
                 normalized_workplace_example,
                 normalized_text
             ):
+
                 matched_term = workplace_example
                 match_source = "workplace_example"
 
@@ -310,6 +353,7 @@ def extract_onet_software(text):
                 # Only treat it as an acronym match for
                 # the actual SQL language entries that exist
                 # in the dataset.
+
                 if acronym.upper() == "SQL":
 
                     normalized_example = (
@@ -322,18 +366,21 @@ def extract_onet_software(text):
                         "structured query language sql",
                         "structure query language sql"
                     }:
+
                         continue
 
                 if not is_primary_acronym_entry(
                     workplace_example,
                     acronym
                 ):
+
                     continue
 
                 if not short_label_in_original_text(
                     acronym,
                     text
                 ):
+
                     continue
 
                 matched_term = acronym
@@ -346,6 +393,7 @@ def extract_onet_software(text):
         # ---------------------------------------------
 
         if matched_term is None:
+
             continue
 
         # ---------------------------------------------
@@ -367,16 +415,38 @@ def extract_onet_software(text):
         )
 
         matches[key] = {
+
             "source": "onet",
-            "onet_soc_code": row["O*NET-SOC Code"],
-            "occupation": row["Title"],
+
+            "onet_soc_code": row[
+                "O*NET-SOC Code"
+            ],
+
+            "occupation": row[
+                "Title"
+            ],
+
             "technology": technology,
+
             "matched_term": matched_term,
+
             "match_source": match_source,
-            "element_id": row["Element ID"],
-            "element_name": row["Element Name"],
-            "hot_technology": row["Hot Technology"],
-            "in_demand": row["In Demand"]
+
+            "element_id": row[
+                "Element ID"
+            ],
+
+            "element_name": row[
+                "Element Name"
+            ],
+
+            "hot_technology": row[
+                "Hot Technology"
+            ],
+
+            "in_demand": row[
+                "In Demand"
+            ]
         }
 
     return list(matches.values())

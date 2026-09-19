@@ -1,5 +1,7 @@
 import os
 import re
+from functools import lru_cache
+
 import pandas as pd
 
 
@@ -16,23 +18,34 @@ def load_esco_skills():
     from the ESCO dataset.
     """
 
-    if not os.path.exists(ESCO_FILE):
+    if not os.path.exists(
+        ESCO_FILE
+    ):
         raise FileNotFoundError(
             f"ESCO skills file not found: {ESCO_FILE}"
         )
 
-    df = pd.read_csv(ESCO_FILE)
+    df = pd.read_csv(
+        ESCO_FILE
+    )
 
     # Keep only useful ESCO concepts
+
     df = df[
         df["skillType"].isin(
-            ["skill/competence", "knowledge"]
+            [
+                "skill/competence",
+                "knowledge"
+            ]
         )
     ].copy()
 
     # Remove rows without a preferred label
+
     df = df.dropna(
-        subset=["preferredLabel"]
+        subset=[
+            "preferredLabel"
+        ]
     )
 
     return df
@@ -53,12 +66,16 @@ def normalize_label(label):
     Normalize an ESCO label for text matching.
     """
 
-    if not isinstance(label, str):
+    if not isinstance(
+        label,
+        str
+    ):
         return ""
 
     label = label.lower()
 
     # Replace punctuation/separators with spaces
+
     label = re.sub(
         r"[^a-z0-9+#.]+",
         " ",
@@ -66,6 +83,7 @@ def normalize_label(label):
     )
 
     # Remove repeated spaces
+
     label = re.sub(
         r"\s+",
         " ",
@@ -75,7 +93,10 @@ def normalize_label(label):
     return label.strip()
 
 
-def label_in_text(label, normalized_text):
+def label_in_text(
+    label,
+    normalized_text
+):
     """
     Check whether a complete ESCO label exists
     in the normalized text.
@@ -84,13 +105,24 @@ def label_in_text(label, normalized_text):
     if not label:
         return False
 
-    padded_label = " " + label + " "
-    padded_text = " " + normalized_text + " "
+    padded_label = (
+        " "
+        + label
+        + " "
+    )
+
+    padded_text = (
+        " "
+        + normalized_text
+        + " "
+    )
 
     return padded_label in padded_text
 
 
-def extract_alternative_labels(alt_labels):
+def extract_alternative_labels(
+    alt_labels
+):
     """
     Convert the ESCO altLabels field into a clean
     list of alternative labels.
@@ -99,32 +131,154 @@ def extract_alternative_labels(alt_labels):
     newline-separated field.
     """
 
-    if not isinstance(alt_labels, str):
+    if not isinstance(
+        alt_labels,
+        str
+    ):
         return []
 
     labels = []
 
-    for label in alt_labels.split("\n"):
+    for label in alt_labels.split(
+        "\n"
+    ):
 
         label = label.strip()
 
         if not label:
             continue
 
-        labels.append(label)
+        labels.append(
+            label
+        )
 
     return labels
+
+
+@lru_cache(maxsize=1)
+def prepare_esco_concepts():
+    """
+    Load and preprocess ESCO concepts once.
+
+    The returned structure contains normalized
+    preferred labels and alternative labels so
+    extraction does not repeatedly process the
+    entire pandas DataFrame.
+    """
+
+    df = load_esco_skills()
+
+    concepts = []
+
+    for row in df.itertuples(
+        index=False
+    ):
+
+        preferred_label = getattr(
+            row,
+            "preferredLabel",
+            None
+        )
+
+        if not isinstance(
+            preferred_label,
+            str
+        ):
+            continue
+
+        preferred_label = (
+            preferred_label.strip()
+        )
+
+        if not preferred_label:
+            continue
+
+        normalized_preferred = (
+            normalize_label(
+                preferred_label
+            )
+        )
+
+        if len(
+            normalized_preferred
+        ) < 3:
+            continue
+
+        alternative_labels = (
+            extract_alternative_labels(
+                getattr(
+                    row,
+                    "altLabels",
+                    None
+                )
+            )
+        )
+
+        normalized_alternatives = []
+
+        for label in alternative_labels:
+
+            normalized_alternative = (
+                normalize_label(
+                    label
+                )
+            )
+
+            if not normalized_alternative:
+                continue
+
+            if len(
+                normalized_alternative
+            ) < 4:
+                continue
+
+            normalized_alternatives.append(
+                (
+                    label,
+                    normalized_alternative
+                )
+            )
+
+        concepts.append(
+            {
+                "concept_uri": getattr(
+                    row,
+                    "conceptUri",
+                    None
+                ),
+                "preferred_label": preferred_label,
+                "normalized_preferred": (
+                    normalized_preferred
+                ),
+                "skill_type": getattr(
+                    row,
+                    "skillType",
+                    None
+                ),
+                "alternative_labels": (
+                    alternative_labels
+                ),
+                "normalized_alternatives": (
+                    normalized_alternatives
+                )
+            }
+        )
+
+    return concepts
 
 
 def extract_esco_skills(text):
     """
     Extract ESCO skills and knowledge concepts
-    from resume text.
+    from resume or job description text.
 
     Uses:
 
     - ESCO preferred labels
     - ESCO alternative labels
+
+    The ESCO dataset is loaded and preprocessed
+    once, then reused for subsequent requests.
 
     No manually maintained skill list is used.
 
@@ -137,47 +291,63 @@ def extract_esco_skills(text):
     if not text or not text.strip():
         return []
 
-    df = load_esco_skills()
+    normalized_text = normalize_label(
+        text
+    )
 
-    normalized_text = normalize_label(text)
+    if not normalized_text:
+        return []
+
+    concepts = prepare_esco_concepts()
 
     matches = {}
 
-    for _, row in df.iterrows():
+    for concept in concepts:
 
-        preferred_label = row["preferredLabel"]
+        concept_uri = (
+            concept["concept_uri"]
+        )
+
+        preferred_label = (
+            concept["preferred_label"]
+        )
 
         alternative_labels = (
-            extract_alternative_labels(
-                row["altLabels"]
-            )
+            concept["alternative_labels"]
+        )
+
+        normalized_preferred = (
+            concept["normalized_preferred"]
         )
 
         # -------------------------------------------------
         # 1. Check the preferred ESCO label
         # -------------------------------------------------
 
-        normalized_preferred = normalize_label(
-            preferred_label
-        )
-
-        if (
-            len(normalized_preferred) >= 3
-            and label_in_text(
-                normalized_preferred,
-                normalized_text
-            )
+        if label_in_text(
+            normalized_preferred,
+            normalized_text
         ):
 
-            concept_uri = row["conceptUri"]
-
             matches[concept_uri] = {
-                "concept_uri": concept_uri,
-                "preferred_label": preferred_label,
-                "skill_type": row["skillType"],
-                "matched_label": preferred_label,
-                "match_type": "preferred",
-                "alternative_labels": alternative_labels
+
+                "concept_uri":
+                    concept_uri,
+
+                "preferred_label":
+                    preferred_label,
+
+                "skill_type":
+                    concept["skill_type"],
+
+                "matched_label":
+                    preferred_label,
+
+                "match_type":
+                    "preferred",
+
+                "alternative_labels":
+                    alternative_labels
             }
 
             continue
@@ -186,36 +356,41 @@ def extract_esco_skills(text):
         # 2. Check ESCO alternative labels
         # -------------------------------------------------
 
-        for label in alternative_labels:
-
-            normalized_alternative = normalize_label(
-                label
-            )
-
-            if not normalized_alternative:
-                continue
-
-            # Ignore extremely short alternative labels.
-            # This helps avoid false matches.
-            if len(normalized_alternative) < 4:
-                continue
+        for (
+            label,
+            normalized_alternative
+        ) in concept[
+            "normalized_alternatives"
+        ]:
 
             if label_in_text(
                 normalized_alternative,
                 normalized_text
             ):
 
-                concept_uri = row["conceptUri"]
-
                 matches[concept_uri] = {
-                    "concept_uri": concept_uri,
-                    "preferred_label": preferred_label,
-                    "skill_type": row["skillType"],
-                    "matched_label": label,
-                    "match_type": "alternative",
-                    "alternative_labels": alternative_labels
+
+                    "concept_uri":
+                        concept_uri,
+
+                    "preferred_label":
+                        preferred_label,
+
+                    "skill_type":
+                        concept["skill_type"],
+
+                    "matched_label":
+                        label,
+
+                    "match_type":
+                        "alternative",
+
+                    "alternative_labels":
+                        alternative_labels
                 }
 
                 break
 
-    return list(matches.values())
+    return list(
+        matches.values()
+    )

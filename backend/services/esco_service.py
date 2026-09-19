@@ -84,16 +84,10 @@ def label_in_text(label, normalized_text):
     if not label:
         return False
 
-    pattern = (
-        r"(?<!\w)"
-        + re.escape(label)
-        + r"(?!\w)"
-    )
+    padded_label = " " + label + " "
+    padded_text = " " + normalized_text + " "
 
-    return re.search(
-        pattern,
-        normalized_text
-    ) is not None
+    return padded_label in padded_text
 
 
 def extract_alternative_labels(alt_labels):

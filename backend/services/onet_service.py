@@ -1,5 +1,7 @@
 import os
 import re
+from functools import lru_cache
+
 import pandas as pd
 
 
@@ -8,6 +10,28 @@ ONET_FILE = os.path.join(
     "onet",
     "software_skills.csv"
 )
+
+
+IGNORED_TERMS = {
+    "analyze",
+    "analyse",
+    "use",
+    "using",
+    "manage",
+    "management",
+    "create",
+    "develop",
+    "development",
+    "design",
+    "test",
+    "testing"
+}
+
+
+SQL_EXAMPLES = {
+    "structured query language sql",
+    "structure query language sql"
+}
 
 
 def load_onet_software():
@@ -70,16 +94,10 @@ def label_in_text(label, normalized_text):
 
         return False
 
-    pattern = (
-        r"(?<!\w)"
-        + re.escape(label)
-        + r"(?!\w)"
-    )
+    padded_label = " " + label + " "
+    padded_text = " " + normalized_text + " "
 
-    return re.search(
-        pattern,
-        normalized_text
-    ) is not None
+    return padded_label in padded_text
 
 
 def short_label_in_original_text(
@@ -230,10 +248,7 @@ def get_canonical_technology(
     # O*NET contains two nearly identical descriptions
     # for the SQL programming language.
 
-    if normalized_example in {
-        "structured query language sql",
-        "structure query language sql"
-    }:
+    if normalized_example in SQL_EXAMPLES:
 
         return "SQL"
 
@@ -243,39 +258,26 @@ def get_canonical_technology(
     return workplace_example
 
 
-def extract_onet_software(text):
+@lru_cache(maxsize=1)
+def prepare_onet_software():
 
-    if not text or not text.strip():
+    """
+    Load and preprocess the O*NET software dataset once.
 
-        return []
+    The prepared data is cached so subsequent resume
+    analyses do not repeatedly load the CSV or perform
+    the same normalization and acronym extraction.
+    """
 
     df = load_onet_software()
 
-    normalized_text = normalize_onet_text(
-        text
-    )
+    exact_matches = {}
+    acronym_matches = {}
 
-    matches = {}
-
-    ignored_terms = {
-        "analyze",
-        "analyse",
-        "use",
-        "using",
-        "manage",
-        "management",
-        "create",
-        "develop",
-        "development",
-        "design",
-        "test",
-        "testing"
-    }
-
-    for _, row in df.iterrows():
+    for row in df.itertuples(index=False):
 
         workplace_example = row[
-            "Workplace Example"
+            df.columns.get_loc("Workplace Example")
         ]
 
         if not isinstance(
@@ -285,168 +287,282 @@ def extract_onet_software(text):
 
             continue
 
-        workplace_example = (
-            workplace_example.strip()
+        workplace_example = workplace_example.strip()
+
+        if not workplace_example:
+
+            continue
+
+        normalized_example = normalize_onet_text(
+            workplace_example
         )
 
-        normalized_workplace_example = (
-            normalize_onet_text(
+        if not normalized_example:
+
+            continue
+
+        if normalized_example in IGNORED_TERMS:
+
+            continue
+
+        if len(normalized_example) < 3:
+
+            continue
+
+        record = {
+            "onet_soc_code": row[
+                df.columns.get_loc("O*NET-SOC Code")
+            ],
+            "occupation": row[
+                df.columns.get_loc("Title")
+            ],
+            "workplace_example": workplace_example,
+            "normalized_example": normalized_example,
+            "element_id": row[
+                df.columns.get_loc("Element ID")
+            ],
+            "element_name": row[
+                df.columns.get_loc("Element Name")
+            ],
+            "hot_technology": row[
+                df.columns.get_loc("Hot Technology")
+            ],
+            "in_demand": row[
+                df.columns.get_loc("In Demand")
+            ]
+        }
+
+        exact_matches.setdefault(
+            normalized_example,
+            []
+        ).append(record)
+
+        acronyms = (
+            extract_acronyms_from_workplace_example(
                 workplace_example
             )
         )
 
-        if not normalized_workplace_example:
+        primary_acronyms = []
 
-            continue
+        for acronym in acronyms:
 
-        if normalized_workplace_example in ignored_terms:
+            # SQL is particularly ambiguous in O*NET.
+            #
+            # Only treat it as an acronym match for
+            # the actual SQL language entries.
 
-            continue
+            if acronym.upper() == "SQL":
 
-        if len(normalized_workplace_example) < 3:
+                if normalized_example not in SQL_EXAMPLES:
 
-            continue
+                    continue
 
-        matched_term = None
-        match_source = None
-
-        # ---------------------------------------------
-        # 1. Exact Workplace Example match
-        # ---------------------------------------------
-
-        if len(normalized_workplace_example) <= 3:
-
-            if short_label_in_original_text(
+            if not is_primary_acronym_entry(
                 workplace_example,
-                text
+                acronym
             ):
 
-                matched_term = workplace_example
-                match_source = "workplace_example"
+                continue
 
-        else:
-
-            if label_in_text(
-                normalized_workplace_example,
-                normalized_text
-            ):
-
-                matched_term = workplace_example
-                match_source = "workplace_example"
-
-        # ---------------------------------------------
-        # 2. Primary acronym matching
-        # ---------------------------------------------
-
-        if matched_term is None:
-
-            acronyms = (
-                extract_acronyms_from_workplace_example(
-                    workplace_example
-                )
+            primary_acronyms.append(
+                acronym
             )
 
-            for acronym in acronyms:
+        for acronym in primary_acronyms:
 
-                # SQL is particularly ambiguous in O*NET.
-                #
-                # Only treat it as an acronym match for
-                # the actual SQL language entries that exist
-                # in the dataset.
+            acronym_key = acronym.lower()
 
-                if acronym.upper() == "SQL":
+            acronym_matches.setdefault(
+                acronym_key,
+                []
+            ).append(record)
 
-                    normalized_example = (
-                        normalize_onet_text(
-                            workplace_example
-                        )
-                    )
+    return (
+        exact_matches,
+        acronym_matches
+    )
 
-                    if normalized_example not in {
-                        "structured query language sql",
-                        "structure query language sql"
-                    }:
 
-                        continue
+def extract_onet_software(text):
 
-                if not is_primary_acronym_entry(
-                    workplace_example,
-                    acronym
-                ):
+    if not text or not text.strip():
 
-                    continue
+        return []
 
-                if not short_label_in_original_text(
-                    acronym,
-                    text
-                ):
+    normalized_text = normalize_onet_text(
+        text
+    )
 
-                    continue
+    if not normalized_text:
 
-                matched_term = acronym
-                match_source = "onet_acronym"
+        return []
 
-                break
+    exact_matches, acronym_matches = (
+        prepare_onet_software()
+    )
 
-        # ---------------------------------------------
-        # No match
-        # ---------------------------------------------
+    matches = {}
 
-        if matched_term is None:
+    # -------------------------------------------------
+    # 1. Exact Workplace Example matches
+    # -------------------------------------------------
+
+    for normalized_example, records in (
+        exact_matches.items()
+    ):
+
+        if not label_in_text(
+            normalized_example,
+            normalized_text
+        ):
 
             continue
 
-        # ---------------------------------------------
-        # Canonical technology label
-        # ---------------------------------------------
+        for record in records:
 
-        technology = get_canonical_technology(
-            workplace_example,
-            matched_term
-        )
-
-        technology_key = normalize_onet_text(
-            technology
-        )
-
-        key = (
-            technology_key,
-            matched_term.lower()
-        )
-
-        matches[key] = {
-
-            "source": "onet",
-
-            "onet_soc_code": row[
-                "O*NET-SOC Code"
-            ],
-
-            "occupation": row[
-                "Title"
-            ],
-
-            "technology": technology,
-
-            "matched_term": matched_term,
-
-            "match_source": match_source,
-
-            "element_id": row[
-                "Element ID"
-            ],
-
-            "element_name": row[
-                "Element Name"
-            ],
-
-            "hot_technology": row[
-                "Hot Technology"
-            ],
-
-            "in_demand": row[
-                "In Demand"
+            workplace_example = record[
+                "workplace_example"
             ]
-        }
+
+            matched_term = workplace_example
+            match_source = "workplace_example"
+
+            technology = get_canonical_technology(
+                workplace_example,
+                matched_term
+            )
+
+            technology_key = normalize_onet_text(
+                technology
+            )
+
+            key = (
+                technology_key,
+                matched_term.lower()
+            )
+
+            matches[key] = {
+
+                "source": "onet",
+
+                "onet_soc_code": record[
+                    "onet_soc_code"
+                ],
+
+                "occupation": record[
+                    "occupation"
+                ],
+
+                "technology": technology,
+
+                "matched_term": matched_term,
+
+                "match_source": match_source,
+
+                "element_id": record[
+                    "element_id"
+                ],
+
+                "element_name": record[
+                    "element_name"
+                ],
+
+                "hot_technology": record[
+                    "hot_technology"
+                ],
+
+                "in_demand": record[
+                    "in_demand"
+                ]
+            }
+
+    # -------------------------------------------------
+    # 2. Primary acronym matching
+    # -------------------------------------------------
+
+    resume_acronyms = set(
+        extract_acronyms_from_workplace_example(
+            text
+        )
+    )
+
+    for acronym in resume_acronyms:
+
+        acronym_key = acronym.lower()
+
+        records = acronym_matches.get(
+            acronym_key,
+            []
+        )
+
+        if not records:
+
+            continue
+
+        for record in records:
+
+            workplace_example = record[
+                "workplace_example"
+            ]
+
+            if not is_primary_acronym_entry(
+                workplace_example,
+                acronym
+            ):
+
+                continue
+
+            matched_term = acronym
+            match_source = "onet_acronym"
+
+            technology = get_canonical_technology(
+                workplace_example,
+                matched_term
+            )
+
+            technology_key = normalize_onet_text(
+                technology
+            )
+
+            key = (
+                technology_key,
+                matched_term.lower()
+            )
+
+            matches[key] = {
+
+                "source": "onet",
+
+                "onet_soc_code": record[
+                    "onet_soc_code"
+                ],
+
+                "occupation": record[
+                    "occupation"
+                ],
+
+                "technology": technology,
+
+                "matched_term": matched_term,
+
+                "match_source": match_source,
+
+                "element_id": record[
+                    "element_id"
+                ],
+
+                "element_name": record[
+                    "element_name"
+                ],
+
+                "hot_technology": record[
+                    "hot_technology"
+                ],
+
+                "in_demand": record[
+                    "in_demand"
+                ]
+            }
 
     return list(matches.values())

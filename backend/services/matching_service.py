@@ -1,5 +1,6 @@
 import os
 import re
+from functools import lru_cache
 
 import pandas as pd
 
@@ -37,32 +38,27 @@ def normalize_concept_label(label):
     return label.strip()
 
 
+@lru_cache(maxsize=1)
 def load_broader_relations():
     """
     Load direct broader relationships between
-    ESCO concepts.
+    ESCO concepts once and cache them in memory.
     """
 
     if not os.path.exists(
         ESCO_RELATIONS_FILE
     ):
-        return pd.DataFrame()
+        return set()
 
     df = pd.read_csv(
-        ESCO_RELATIONS_FILE
+        ESCO_RELATIONS_FILE,
+        usecols=[
+            "conceptUri",
+            "broaderUri"
+        ]
     )
 
-    required_columns = {
-        "conceptUri",
-        "broaderUri"
-    }
-
-    if not required_columns.issubset(
-        set(df.columns)
-    ):
-        return pd.DataFrame()
-
-    return (
+    df = (
         df[
             [
                 "conceptUri",
@@ -71,6 +67,13 @@ def load_broader_relations():
         ]
         .dropna()
         .drop_duplicates()
+    )
+
+    return set(
+        zip(
+            df["conceptUri"],
+            df["broaderUri"]
+        )
     )
 
 
@@ -301,7 +304,7 @@ def match_resume_to_job(
 
     related_job_keys = set()
 
-    if not broader_relations.empty:
+    if broader_relations:
 
         # Only ESCO concepts can use
         # ESCO hierarchy relationships.
@@ -337,32 +340,35 @@ def match_resume_to_job(
             if key[0] == "esco"
         }
 
-        for _, row in (
-            broader_relations.iterrows()
-        ):
+        # ------------------------------------------------
+        # Direct lookup of relationships for each
+        # resume ESCO concept.
+        # ------------------------------------------------
 
-            specific_uri = row[
-                "conceptUri"
-            ]
+        for specific_uri in resume_esco_uris:
 
-            broader_uri = row[
-                "broaderUri"
-            ]
-
-            if (
-                specific_uri
-                in resume_esco_uris
-
-                and
-
+            for (
+                relation_specific_uri,
                 broader_uri
-                in job_esco_uris
+            ) in broader_relations:
 
-                and
+                if (
+                    relation_specific_uri
+                    != specific_uri
+                ):
+                    continue
 
-                broader_uri
-                not in exact_esco_uris
-            ):
+                if (
+                    broader_uri
+                    not in job_esco_uris
+                ):
+                    continue
+
+                if (
+                    broader_uri
+                    in exact_esco_uris
+                ):
+                    continue
 
                 job_key = (
                     "esco",

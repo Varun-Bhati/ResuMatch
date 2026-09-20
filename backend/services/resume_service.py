@@ -47,22 +47,23 @@ def extract_text_from_pdf(file_path):
 
         for page in pdf_document:
 
-            # Slightly higher resolution for better OCR accuracy
-            # while keeping processing lighter than 1.5x.
+            # Low-resolution grayscale image.
+            # This keeps OCR processing lightweight on Render.
             pix = page.get_pixmap(
-                matrix=fitz.Matrix(1.25, 1.25),
+                matrix=fitz.Matrix(1.0, 1.0),
                 colorspace=fitz.csGRAY
             )
 
             image = pix.pil_image()
 
-            # PSM 6 works well for a single resume page
-            # with multiple text blocks.
+            # Use a sparse-text layout mode.
+            # This reduces processing compared with more complex
+            # page-layout analysis.
             page_text = pytesseract.image_to_string(
                 image,
                 lang="eng",
-                config="--psm 6",
-                timeout=15
+                config="--psm 11",
+                timeout=10
             )
 
             ocr_text += page_text + "\n"

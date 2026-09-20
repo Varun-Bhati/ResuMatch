@@ -13,17 +13,32 @@ def clean_text(text):
     text = text.replace("\r\n", "\n")
     text = text.replace("\r", "\n")
 
-    # Remove excessive spaces
-    text = re.sub(r"[ \t]+", " ", text)
-
-    # Remove excessive blank lines
-    text = re.sub(r"\n\s*\n+", "\n\n", text)
-
     # Remove unwanted non-printable characters
     text = "".join(
         character
         for character in text
         if character.isprintable() or character == "\n"
+    )
+
+    # Normalize common OCR-generated whitespace
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # Remove excessive blank lines
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
+
+    # Remove obvious OCR noise characters when they appear
+    # as isolated characters rather than meaningful text.
+    text = re.sub(
+        r"(?m)^\s*[|~©®§]+\s*$",
+        "",
+        text
+    )
+
+    # Remove repeated standalone punctuation noise
+    text = re.sub(
+        r"(?m)^\s*[/\\|~`^]+\s*$",
+        "",
+        text
     )
 
     return text.strip()

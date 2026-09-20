@@ -1,5 +1,6 @@
 import re
 
+
 from backend.services.section_detector import detect_sections
 
 
@@ -179,8 +180,11 @@ def calculate_formatting_score(text):
     # Excessive unusual symbols
     # ---------------------------------------------------------
 
+    # Allow common resume punctuation, including Unicode
+    # punctuation that can legitimately appear in resumes
+    # or be produced by OCR.
     symbol_matches = re.findall(
-        r"[^\w\s.,:;!?@#$%&()+\-/#'.]",
+        r"[^\w\s.,:;!?@#$%&()+/#'.\[\]{}|_\\–—•·“”‘’\-]",
         text
     )
 

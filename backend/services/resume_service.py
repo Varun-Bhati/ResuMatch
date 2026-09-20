@@ -47,8 +47,8 @@ def extract_text_from_pdf(file_path):
 
         for page in pdf_document:
 
-            # Low-resolution grayscale image.
-            # This keeps OCR processing lightweight on Render.
+            # Render the page at low resolution in grayscale.
+            # This keeps the OCR workload lightweight on Render.
             pix = page.get_pixmap(
                 matrix=fitz.Matrix(1.0, 1.0),
                 colorspace=fitz.csGRAY
@@ -56,17 +56,78 @@ def extract_text_from_pdf(file_path):
 
             image = pix.pil_image()
 
-            # Use a sparse-text layout mode.
-            # This reduces processing compared with more complex
-            # page-layout analysis.
-            page_text = pytesseract.image_to_string(
-                image,
+            image_width, image_height = image.size
+
+            # -----------------------------------
+            # Overlapping OCR regions
+            # -----------------------------------
+            #
+            # The two regions overlap around the middle
+            # of the page. This helps preserve section
+            # headings that fall near the split point.
+            #
+
+            split_start = int(image_height * 0.40)
+            split_end = int(image_height * 0.60)
+
+            top_region = image.crop(
+                (0, 0, image_width, split_end)
+            )
+
+            bottom_region = image.crop(
+                (0, split_start, image_width, image_height)
+            )
+
+            # -----------------------------------
+            # OCR top region
+            # -----------------------------------
+
+            top_text = pytesseract.image_to_string(
+                top_region,
                 lang="eng",
-                config="--psm 11",
+                config="--psm 6",
                 timeout=10
             )
 
-            ocr_text += page_text + "\n"
+            # -----------------------------------
+            # OCR bottom region
+            # -----------------------------------
+
+            bottom_text = pytesseract.image_to_string(
+                bottom_region,
+                lang="eng",
+                config="--psm 6",
+                timeout=10
+            )
+
+            # -----------------------------------
+            # Remove duplicate OCR lines
+            # -----------------------------------
+            #
+            # Because the regions overlap, some headings
+            # or lines can appear twice. Keep the first
+            # occurrence and remove exact duplicate lines.
+            #
+
+            combined_text = top_text + "\n" + bottom_text
+
+            seen_lines = set()
+            cleaned_lines = []
+
+            for line in combined_text.splitlines():
+
+                normalized_line = " ".join(line.split()).strip()
+
+                if not normalized_line:
+                    continue
+
+                if normalized_line.lower() in seen_lines:
+                    continue
+
+                seen_lines.add(normalized_line.lower())
+                cleaned_lines.append(line.strip())
+
+            ocr_text += "\n".join(cleaned_lines) + "\n"
 
         pdf_document.close()
 

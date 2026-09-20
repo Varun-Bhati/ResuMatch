@@ -1,77 +1,17 @@
 import re
 
+from backend.services.section_detector import detect_sections
+
 
 def detect_resume_sections(text):
     """
-    Detect common ATS-friendly resume sections.
+    Use the centralized ResuMatch section detector.
 
-    Section detection is based on recognizable headings
-    rather than arbitrary keyword occurrences.
+    This keeps ATS section detection consistent
+    with the main resume analysis pipeline.
     """
 
-    section_patterns = {
-        "summary": [
-            r"^\s*summary\s*$",
-            r"^\s*professional summary\s*$",
-            r"^\s*career summary\s*$",
-            r"^\s*profile\s*$",
-            r"^\s*objective\s*$",
-            r"^\s*career objective\s*$",
-        ],
-        "experience": [
-            r"^\s*experience\s*$",
-            r"^\s*work experience\s*$",
-            r"^\s*professional experience\s*$",
-            r"^\s*employment\s*$",
-            r"^\s*work history\s*$",
-        ],
-        "education": [
-            r"^\s*education\s*$",
-            r"^\s*academic background\s*$",
-            r"^\s*academic qualification\s*$",
-            r"^\s*qualifications\s*$",
-        ],
-        "skills": [
-            r"^\s*skills\s*$",
-            r"^\s*technical skills\s*$",
-            r"^\s*core skills\s*$",
-            r"^\s*technical expertise\s*$",
-            r"^\s*technologies\s*$",
-        ],
-        "projects": [
-            r"^\s*projects\s*$",
-            r"^\s*personal projects\s*$",
-            r"^\s*academic projects\s*$",
-            r"^\s*project experience\s*$",
-        ],
-        "certifications": [
-            r"^\s*certifications\s*$",
-            r"^\s*certificates\s*$",
-            r"^\s*professional certifications\s*$",
-        ],
-    }
-
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip()
-    ]
-
-    detected_sections = {}
-
-    for section, patterns in section_patterns.items():
-
-        detected_sections[section] = any(
-            re.search(
-                pattern,
-                line,
-                re.IGNORECASE
-            )
-            for line in lines
-            for pattern in patterns
-        )
-
-    return detected_sections
+    return detect_sections(text)
 
 
 def detect_contact_information(text):

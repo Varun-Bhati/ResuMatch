@@ -8,7 +8,7 @@ import pytesseract
 
 # Use the Windows Tesseract path when running locally.
 # In Docker/Linux, Tesseract is installed system-wide
-# and is already available on PATH.
+# and is available on PATH.
 if os.name == "nt":
     pytesseract.pytesseract.tesseract_cmd = (
         r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -19,9 +19,8 @@ def extract_text_from_pdf(file_path):
     """
     Extract text from a PDF.
 
-    First, try normal PDF text extraction using pypdf.
-    If the PDF contains little or no selectable text,
-    automatically use OCR with Tesseract.
+    First, try normal PDF text extraction.
+    If little or no text is found, use OCR for scanned PDFs.
     """
 
     # -----------------------------------
@@ -34,8 +33,6 @@ def extract_text_from_pdf(file_path):
     for page in reader.pages:
         text += page.extract_text() or ""
 
-    # If enough text was extracted, return it normally.
-    # This means normal text-based PDFs do NOT need OCR.
     if len(text.strip()) >= 100:
         return text
 
@@ -49,17 +46,20 @@ def extract_text_from_pdf(file_path):
 
         for page in pdf_document:
 
-            # Render the PDF page as an image.
-            # 2.0x gives good OCR quality without being excessive.
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            # Render at 1.5x instead of 2x.
+            # This reduces memory usage on small servers.
+            pix = page.get_pixmap(
+                matrix=fitz.Matrix(1.5, 1.5)
+            )
 
-            # Convert the rendered page into an image.
             image = pix.pil_image()
 
-            # Run Tesseract OCR.
+            # Give each Tesseract page operation a maximum
+            # of 20 seconds.
             page_text = pytesseract.image_to_string(
                 image,
-                lang="eng"
+                lang="eng",
+                timeout=20
             )
 
             ocr_text += page_text + "\n"
@@ -70,8 +70,6 @@ def extract_text_from_pdf(file_path):
 
     except Exception as e:
         print(f"OCR failed: {e}")
-
-        # Return the original extracted text if OCR fails.
         return text
 
 

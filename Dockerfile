@@ -18,4 +18,4 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["gunicorn", "app:app"]
+CMD ["gunicorn", "--timeout", "120", "app:app"]

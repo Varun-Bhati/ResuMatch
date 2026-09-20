@@ -20,7 +20,8 @@ def extract_text_from_pdf(file_path):
     Extract text from a PDF.
 
     First, try normal PDF text extraction.
-    If little or no text is found, use OCR for scanned PDFs.
+    If little or no text is found, use lightweight OCR
+    for scanned/image-based PDFs.
     """
 
     # -----------------------------------
@@ -37,7 +38,7 @@ def extract_text_from_pdf(file_path):
         return text
 
     # -----------------------------------
-    # STEP 2: OCR for scanned/image PDFs
+    # STEP 2: Lightweight OCR
     # -----------------------------------
 
     try:
@@ -46,20 +47,22 @@ def extract_text_from_pdf(file_path):
 
         for page in pdf_document:
 
-            # Render at 1.5x instead of 2x.
-            # This reduces memory usage on small servers.
+            # Slightly higher resolution for better OCR accuracy
+            # while keeping processing lighter than 1.5x.
             pix = page.get_pixmap(
-                matrix=fitz.Matrix(1.5, 1.5)
+                matrix=fitz.Matrix(1.25, 1.25),
+                colorspace=fitz.csGRAY
             )
 
             image = pix.pil_image()
 
-            # Give each Tesseract page operation a maximum
-            # of 20 seconds.
+            # PSM 6 works well for a single resume page
+            # with multiple text blocks.
             page_text = pytesseract.image_to_string(
                 image,
                 lang="eng",
-                timeout=20
+                config="--psm 6",
+                timeout=15
             )
 
             ocr_text += page_text + "\n"

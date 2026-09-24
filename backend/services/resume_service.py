@@ -15,6 +15,12 @@ if os.name == "nt":
     )
 
 
+# Limit Tesseract to one CPU thread.
+# This is important on small Render instances because
+# Tesseract can otherwise consume too much CPU.
+os.environ["OMP_THREAD_LIMIT"] = "1"
+
+
 def extract_text_from_pdf(file_path):
     """
     Extract text from a PDF.
@@ -56,78 +62,21 @@ def extract_text_from_pdf(file_path):
 
             image = pix.pil_image()
 
-            image_width, image_height = image.size
-
             # -----------------------------------
-            # Overlapping OCR regions
-            # -----------------------------------
-            #
-            # The two regions overlap around the middle
-            # of the page. This helps preserve section
-            # headings that fall near the split point.
-            #
-
-            split_start = int(image_height * 0.40)
-            split_end = int(image_height * 0.60)
-
-            top_region = image.crop(
-                (0, 0, image_width, split_end)
-            )
-
-            bottom_region = image.crop(
-                (0, split_start, image_width, image_height)
-            )
-
-            # -----------------------------------
-            # OCR top region
+            # OCR
             # -----------------------------------
 
-            top_text = pytesseract.image_to_string(
-                top_region,
+            # Use the LSTM OCR engine directly.
+            # PSM 6 is suitable for a resume containing
+            # multiple blocks of text.
+            page_text = pytesseract.image_to_string(
+                image,
                 lang="eng",
-                config="--psm 6",
-                timeout=10
+                config="--oem 1 --psm 6",
+                timeout=15
             )
 
-            # -----------------------------------
-            # OCR bottom region
-            # -----------------------------------
-
-            bottom_text = pytesseract.image_to_string(
-                bottom_region,
-                lang="eng",
-                config="--psm 6",
-                timeout=10
-            )
-
-            # -----------------------------------
-            # Remove duplicate OCR lines
-            # -----------------------------------
-            #
-            # Because the regions overlap, some headings
-            # or lines can appear twice. Keep the first
-            # occurrence and remove exact duplicate lines.
-            #
-
-            combined_text = top_text + "\n" + bottom_text
-
-            seen_lines = set()
-            cleaned_lines = []
-
-            for line in combined_text.splitlines():
-
-                normalized_line = " ".join(line.split()).strip()
-
-                if not normalized_line:
-                    continue
-
-                if normalized_line.lower() in seen_lines:
-                    continue
-
-                seen_lines.add(normalized_line.lower())
-                cleaned_lines.append(line.strip())
-
-            ocr_text += "\n".join(cleaned_lines) + "\n"
+            ocr_text += page_text + "\n"
 
         pdf_document.close()
 

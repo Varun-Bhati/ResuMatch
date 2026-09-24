@@ -12,6 +12,25 @@ ESCO_RELATIONS_FILE = os.path.join(
 )
 
 
+# ============================================================
+# Cross-source technology identities
+# ============================================================
+#
+# Some technologies can appear in both ESCO and O*NET.
+#
+# ESCO identifies concepts using a concept URI, while O*NET
+# identifies technologies using the technology name.
+#
+# For these shared technologies, use the normalized technology
+# name as the identity so ESCO and O*NET can match each other.
+#
+CROSS_SOURCE_TECHNOLOGIES = {
+    "javascript",
+    "typescript",
+    "node.js",
+}
+
+
 def normalize_concept_label(label):
     """
     Normalize a concept label so it can be
@@ -79,22 +98,54 @@ def load_broader_relations():
 
 def get_concept_key(concept):
     """
-    Return a unique identifier for either
-    ESCO or O*NET concepts.
+    Return a unique identifier for ESCO or O*NET concepts.
 
     ESCO:
-        concept URI is the identity.
+        Normally uses the concept URI.
 
     O*NET:
-        technology identity is the identity.
+        Normally uses the technology identity.
 
-    We intentionally do NOT use O*NET Element ID
-    as the technology identity because multiple
-    technologies can share the same O*NET element.
+    Cross-source technologies:
+        Known technologies that can appear in both ESCO
+        and O*NET use a shared technology identity.
+
+    This allows concepts such as:
+
+        ESCO JavaScript <-> O*NET JavaScript
+        ESCO TypeScript <-> O*NET TypeScript
+        ESCO Node.js    <-> O*NET Node.js
     """
 
     # ----------------------------------------------------
-    # ESCO concept
+    # 1. Cross-source technology identity
+    # ----------------------------------------------------
+    #
+    # Check the readable technology/label before assigning
+    # the source-specific ESCO or O*NET identity.
+    #
+    possible_labels = [
+        concept.get("technology"),
+        concept.get("preferred_label"),
+        concept.get("matched_label"),
+        concept.get("element_name")
+    ]
+
+    for label in possible_labels:
+
+        normalized_label = normalize_concept_label(
+            label
+        )
+
+        if normalized_label in CROSS_SOURCE_TECHNOLOGIES:
+
+            return (
+                "technology",
+                normalized_label
+            )
+
+    # ----------------------------------------------------
+    # 2. ESCO concept
     # ----------------------------------------------------
 
     if concept.get("concept_uri"):
@@ -105,7 +156,7 @@ def get_concept_key(concept):
         )
 
     # ----------------------------------------------------
-    # O*NET concept
+    # 3. O*NET concept
     # ----------------------------------------------------
 
     if concept.get("technology"):
@@ -118,6 +169,7 @@ def get_concept_key(concept):
             "match_source"
         )
 
+        # ------------------------------------------------
         # O*NET acronym identity
         #
         # Example:
@@ -128,6 +180,7 @@ def get_concept_key(concept):
         # Identity becomes:
         #
         # ("onet", "aws")
+        # ------------------------------------------------
 
         if (
             match_source == "onet_acronym"
@@ -150,7 +203,9 @@ def get_concept_key(concept):
                     normalized_matched_term
                 )
 
+        # ------------------------------------------------
         # Normal O*NET technology identity
+        # ------------------------------------------------
 
         technology = (
             normalize_concept_label(
@@ -175,16 +230,19 @@ def get_concept_label(concept):
     """
 
     if concept.get("preferred_label"):
+
         return concept[
             "preferred_label"
         ]
 
     if concept.get("technology"):
+
         return concept[
             "technology"
         ]
 
     if concept.get("element_name"):
+
         return concept[
             "element_name"
         ]
@@ -205,12 +263,15 @@ def match_resume_to_job(
     1. Exact ESCO concept match = 100%
     2. Direct ESCO broader concept match = 50%
     3. Exact O*NET technology match = 100%
-    4. No match = 0%
+    4. Cross-source technology match = 100%
+    5. No match = 0%
 
-    ESCO concepts use their concept URI.
+    ESCO concepts normally use their concept URI.
 
-    O*NET concepts use their technology identity,
-    not their Element ID.
+    O*NET concepts normally use their technology identity.
+
+    Shared technologies such as JavaScript, TypeScript,
+    and Node.js use a common cross-source identity.
     """
 
     if not job_matches:
@@ -244,6 +305,7 @@ def match_resume_to_job(
         )
 
         if key:
+
             resume_by_key[key] = concept
 
     for concept in job_matches:
@@ -253,6 +315,7 @@ def match_resume_to_job(
         )
 
         if key:
+
             job_by_key[key] = concept
 
     resume_keys = set(

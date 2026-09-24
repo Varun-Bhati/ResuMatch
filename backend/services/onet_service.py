@@ -34,6 +34,17 @@ SQL_EXAMPLES = {
 }
 
 
+# OCR can sometimes corrupt technology names.
+# Map common OCR variants to the canonical O*NET technology name.
+OCR_TECHNOLOGY_ALIASES = {
+    "node js": "node.js",
+    "nodejs": "node.js",
+    "nodej": "node.js",
+    "javascrit": "javascript",
+    "typeset": "typescript",
+}
+
+
 def load_onet_software():
 
     if not os.path.exists(ONET_FILE):
@@ -478,7 +489,96 @@ def extract_onet_software(text):
             }
 
     # -------------------------------------------------
-    # 2. Primary acronym matching
+    # 2. OCR technology alias matching
+    # -------------------------------------------------
+
+    for alias, canonical in OCR_TECHNOLOGY_ALIASES.items():
+
+        if not label_in_text(
+            alias,
+            normalized_text
+        ):
+
+            continue
+
+        canonical_key = normalize_onet_text(
+            canonical
+        )
+
+        records = exact_matches.get(
+            canonical_key,
+            []
+        )
+
+        if not records:
+
+            continue
+
+        for record in records:
+
+            workplace_example = record[
+                "workplace_example"
+            ]
+
+            # Keep the canonical O*NET technology name
+            # as the matched term so OCR variants and
+            # correctly extracted technology names can
+            # share the same concept identity.
+
+            matched_term = canonical
+            match_source = "ocr_alias"
+
+            technology = get_canonical_technology(
+                workplace_example,
+                matched_term
+            )
+
+            technology_key = normalize_onet_text(
+                technology
+            )
+
+            key = (
+                technology_key,
+                matched_term.lower()
+            )
+
+            matches[key] = {
+
+                "source": "onet",
+
+                "onet_soc_code": record[
+                    "onet_soc_code"
+                ],
+
+                "occupation": record[
+                    "occupation"
+                ],
+
+                "technology": technology,
+
+                "matched_term": matched_term,
+
+                "match_source": match_source,
+
+                "element_id": record[
+                    "element_id"
+                ],
+
+                "element_name": record[
+                    "element_name"
+                ],
+
+                "hot_technology": record[
+                    "hot_technology"
+                ],
+
+                "in_demand": record[
+                    "in_demand"
+                ]
+            }
+
+    # -------------------------------------------------
+    # 3. Primary acronym matching
     # -------------------------------------------------
 
     resume_acronyms = set(

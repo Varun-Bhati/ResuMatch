@@ -1,5 +1,6 @@
 import os
 import re
+
 import pandas as pd
 
 
@@ -10,18 +11,40 @@ ESCO_RELATIONS_FILE = os.path.join(
 )
 
 
+# ---------------------------------------------------------
+# Cross-source technology identities
+# ---------------------------------------------------------
+#
+# ESCO and O*NET can represent the same technology
+# using different identifiers.
+#
+# These technologies should therefore match by their
+# normalized technology name instead of their source-specific
+# identifier.
+#
+CROSS_SOURCE_TECHNOLOGIES = {
+    "javascript",
+    "typescript",
+    "node.js",
+}
+
+
 def load_broader_relations():
     if not os.path.exists(ESCO_RELATIONS_FILE):
         return pd.DataFrame()
 
-    df = pd.read_csv(ESCO_RELATIONS_FILE)
+    df = pd.read_csv(
+        ESCO_RELATIONS_FILE
+    )
 
     required_columns = {
         "conceptUri",
         "broaderUri"
     }
 
-    if not required_columns.issubset(df.columns):
+    if not required_columns.issubset(
+        df.columns
+    ):
         return pd.DataFrame()
 
     return (
@@ -61,23 +84,55 @@ def get_concept_key(concept):
     """
     Create a stable identity for a technical concept.
 
-    ESCO:
-        concept URI identifies the concept.
+    Cross-source technologies such as JavaScript,
+    TypeScript, and Node.js are identified by their
+    normalized technology name so ESCO and O*NET
+    representations can match each other.
 
-    O*NET:
-        technology name identifies the software technology.
+    Other ESCO concepts use their concept URI.
 
-    We intentionally DO NOT use O*NET Element ID as the
-    technology identity because multiple technologies can
-    share the same O*NET element/category.
+    Other O*NET technologies use their technology name.
     """
 
-    if concept.get("concept_uri"):
+    # -----------------------------------------------------
+    # Cross-source technology matching
+    # -----------------------------------------------------
 
+    possible_labels = [
+        concept.get("technology"),
+        concept.get("preferred_label"),
+        concept.get("matched_label"),
+        concept.get("element_name"),
+    ]
+
+    for label in possible_labels:
+
+        normalized_label = normalize_label(
+            label
+        )
+
+        if (
+            normalized_label
+            in CROSS_SOURCE_TECHNOLOGIES
+        ):
+            return (
+                "technology",
+                normalized_label
+            )
+
+    # -----------------------------------------------------
+    # ESCO identity
+    # -----------------------------------------------------
+
+    if concept.get("concept_uri"):
         return (
             "esco",
             concept["concept_uri"]
         )
+
+    # -----------------------------------------------------
+    # O*NET technology identity
+    # -----------------------------------------------------
 
     if concept.get("technology"):
 
@@ -86,14 +141,16 @@ def get_concept_key(concept):
         )
 
         if technology:
-
             return (
                 "onet",
                 technology
             )
 
-    if concept.get("element_id"):
+    # -----------------------------------------------------
+    # O*NET fallback identity
+    # -----------------------------------------------------
 
+    if concept.get("element_id"):
         return (
             "onet_element",
             concept["element_id"]
@@ -108,30 +165,35 @@ def get_concept_label(concept):
     """
 
     if concept.get("preferred_label"):
-
         return concept["preferred_label"]
 
     if concept.get("technology"):
-
         return concept["technology"]
 
     if concept.get("element_name"):
-
         return concept["element_name"]
 
     return ""
 
 
-def analyze_keywords(resume_analysis, job_analysis):
+def analyze_keywords(
+    resume_analysis,
+    job_analysis
+):
     """
     Compare technical concepts extracted by ResuMatch.
 
     Exact ESCO/O*NET matches receive full credit.
 
+    Cross-source technologies such as JavaScript,
+    TypeScript, and Node.js are treated as exact
+    matches when their normalized technology identity
+    is the same.
+
     Related ESCO concepts receive partial credit.
 
-    O*NET technologies are identified by their technology
-    names rather than their shared Element IDs.
+    O*NET technologies are identified by their
+    technology names rather than shared Element IDs.
     """
 
     resume_concepts = resume_analysis.get(
@@ -144,32 +206,34 @@ def analyze_keywords(resume_analysis, job_analysis):
         []
     )
 
-    # --------------------------------
+    # -----------------------------------------------------
     # Build resume concept map
-    # --------------------------------
+    # -----------------------------------------------------
 
     resume_map = {}
 
     for concept in resume_concepts:
 
-        key = get_concept_key(concept)
+        key = get_concept_key(
+            concept
+        )
 
         if key:
-
             resume_map[key] = concept
 
-    # --------------------------------
+    # -----------------------------------------------------
     # Build job concept map
-    # --------------------------------
+    # -----------------------------------------------------
 
     job_map = {}
 
     for concept in job_concepts:
 
-        key = get_concept_key(concept)
+        key = get_concept_key(
+            concept
+        )
 
         if key:
-
             job_map[key] = concept
 
     resume_keys = set(
@@ -180,9 +244,9 @@ def analyze_keywords(resume_analysis, job_analysis):
         job_map.keys()
     )
 
-    # --------------------------------
+    # -----------------------------------------------------
     # Exact matches
-    # --------------------------------
+    # -----------------------------------------------------
 
     exact_keys = (
         resume_keys.intersection(
@@ -201,21 +265,19 @@ def analyze_keywords(resume_analysis, job_analysis):
         )
 
         if label:
-
             matched_keywords.append(
                 label
             )
 
-    # --------------------------------
+    # -----------------------------------------------------
     # Related ESCO concepts
-    # --------------------------------
+    # -----------------------------------------------------
 
     broader_relations = (
         load_broader_relations()
     )
 
     related_keywords = []
-
     related_keys = set()
 
     if not broader_relations.empty:
@@ -308,9 +370,9 @@ def analyze_keywords(resume_analysis, job_analysis):
                     job_key
                 )
 
-    # --------------------------------
+    # -----------------------------------------------------
     # Missing concepts
-    # --------------------------------
+    # -----------------------------------------------------
 
     missing_keys = (
         job_keys
@@ -329,14 +391,13 @@ def analyze_keywords(resume_analysis, job_analysis):
         )
 
         if label:
-
             missing_keywords.append(
                 label
             )
 
-    # --------------------------------
+    # -----------------------------------------------------
     # Coverage
-    # --------------------------------
+    # -----------------------------------------------------
 
     job_keyword_count = len(
         job_keys
@@ -372,9 +433,9 @@ def analyze_keywords(resume_analysis, job_analysis):
             2
         )
 
-    # --------------------------------
+    # -----------------------------------------------------
     # Final result
-    # --------------------------------
+    # -----------------------------------------------------
 
     return {
         "keyword_coverage_percentage":
@@ -383,7 +444,8 @@ def analyze_keywords(resume_analysis, job_analysis):
         "matched_keywords":
             sorted(
                 matched_keywords,
-                key=lambda item: item.lower()
+                key=lambda item:
+                    item.lower()
             ),
 
         "related_keywords":
@@ -396,7 +458,8 @@ def analyze_keywords(resume_analysis, job_analysis):
         "missing_keywords":
             sorted(
                 missing_keywords,
-                key=lambda item: item.lower()
+                key=lambda item:
+                    item.lower()
             ),
 
         "matched_count":
